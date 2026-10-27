@@ -32,7 +32,15 @@ internal fun UpdateDialog(state: UpdateUiState, dispatch: (UpdateUiEvent) -> Uni
         title = "Atualização do WinDock",
         state = rememberDialogState(width = 500.dp, height = 470.dp),
         resizable = false,
+        alwaysOnTop = true,
     ) {
+        // This dialog is created at application scope, without a settings-window
+        // owner. Explicitly raise it when opened, including manual checks.
+        LaunchedEffect(window) {
+            while (!window.isShowing) withFrameNanos { }
+            window.toFront()
+            window.requestFocus()
+        }
         MaterialTheme {
             Surface {
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {

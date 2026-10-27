@@ -355,7 +355,7 @@ private fun ApplicationScope.DockApp(initial: DockUiState) {
         LocalUpdateCheck provides { updater.dispatch(UpdateUiEvent.Check) }) {
         if (state.dockActive) {
             DockWindow(state, apps, artwork, hover, menu != null, onGlassVisible = { glassVisible = it }, store::dispatch)
-            if (state.settingsOpen) SettingsWindow(state, store::dispatch)
+            if (state.settingsOpen) SettingsWindow(state, store::dispatch, updateState.visible)
         } else {
             PreviewWindow(state, apps, artwork, hover, store::dispatch)
         }
@@ -800,12 +800,12 @@ private const val VK_RBUTTON = 0x02
 private const val VK_ESCAPE = 0x1B
 
 @Composable
-private fun SettingsWindow(state: DockUiState, onEvent: (UiEvent) -> Unit) {
+private fun SettingsWindow(state: DockUiState, onEvent: (UiEvent) -> Unit, updateVisible: Boolean) {
     val initialSize = remember { comfortableWindowSize(680, 820) }
     Window(
         onCloseRequest = { onEvent(UiEvent.CancelThemeChanges) }, title = "Personalizar WinDock", icon = AppIcon,
         state = rememberWindowState(size = initialSize, position = WindowPosition(Alignment.Center)),
-        resizable = true, alwaysOnTop = true,
+        resizable = true, alwaysOnTop = !updateVisible,
     ) {
         DisposableEffect(window) {
             window.minimumSize = java.awt.Dimension(minOf(520, initialSize.width.value.toInt()), minOf(480, initialSize.height.value.toInt()))
