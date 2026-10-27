@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="64" viewBox="0 0 360 64" role="img" aria-label="Baixar WinDock para Windows · Download for Windows">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2B8CFF"/>
+      <stop offset="1" stop-color="#0B6DDF"/>
+    </linearGradient>
+  </defs>
+  <rect x="0.5" y="0.5" width="359" height="63" rx="14" fill="url(#bg)" stroke="#0A5DC0"/>
+  <rect x="2" y="2" width="356" height="28" rx="12" fill="#FFFFFF" opacity="0.10"/>
+  <!-- Download arrow into a tray -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 17 V37"/>
+    <path d="M29 29 L38 38 L47 29"/>
+    <path d="M26 44 V47 H50 V44"/>
+  </g>
+  <text x="68" y="30" fill="#FFFFFF" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="19" font-weight="600">Baixar WinDock para Windows</text>
+  <text x="68" y="49" fill="#DCEBFF" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13">Download for Windows · instalador .msi</text>
+</svg>

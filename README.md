@@ -1,6 +1,10 @@
 # WinDock
 
-[Português](#português) · [English](#english)
+<p align="center">
+  <a href="https://github.com/arthurriosprogramador/win-dock/releases/latest/download/WinDock.msi"><img src="docs/download.svg" alt="Baixar WinDock para Windows · Download for Windows" width="360"></a>
+</p>
+
+<p align="center">Windows 10 / 11 · <a href="#português">Português</a> · <a href="#english">English</a></p>
 
 ![Vidro / Glass](docs/gifs/glass.gif)
 
@@ -20,7 +24,7 @@ WinDock é uma barra de tarefas personalizada para Windows 10/11, feita com Kotl
 
 ### Download
 
-Baixe o instalador **WinDock-1.0.0.msi** em [Releases](https://github.com/arthurriosprogramador/win-dock/releases/latest). A instalação é por usuário, sem pedir administrador. O instalador não é assinado, então o Windows pode mostrar o aviso do SmartScreen: clique em **Mais informações → Executar assim mesmo**.
+**[⬇ Baixar WinDock.msi](https://github.com/arthurriosprogramador/win-dock/releases/latest/download/WinDock.msi)** — depois é só abrir o arquivo baixado. A instalação é por usuário, sem pedir administrador. O instalador não é assinado, então o Windows pode mostrar o aviso do SmartScreen: clique em **Mais informações → Executar assim mesmo**.
 
 ### Como rodar o código
 
@@ -50,7 +54,7 @@ WinDock is a custom taskbar for Windows 10/11, built with Kotlin and Compose Mul
 
 ### Download
 
-Get the **WinDock-1.0.0.msi** installer from [Releases](https://github.com/arthurriosprogramador/win-dock/releases/latest). It installs per user, with no administrator prompt. The installer isn't code-signed, so Windows may show a SmartScreen warning: click **More info → Run anyway**.
+**[⬇ Download WinDock.msi](https://github.com/arthurriosprogramador/win-dock/releases/latest/download/WinDock.msi)** — then just open the downloaded file. It installs per user, with no administrator prompt. The installer isn't code-signed, so Windows may show a SmartScreen warning: click **More info → Run anyway**.
 
 ### Running from source
 
