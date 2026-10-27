@@ -13,10 +13,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,6 +59,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,7 +74,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.ApplicationScope
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Window
 import androidx.compose.runtime.key
 import androidx.compose.ui.window.WindowPosition
@@ -93,6 +93,12 @@ import dev.windock.windows.TaskbarApps
 import dev.windock.windows.SystemMonitor
 import dev.windock.windows.Win32
 import dev.windock.windows.isFullscreenAppInFront
+import dev.windock.updates.LocalUpdateCheck
+import dev.windock.updates.UpdateDialog
+import dev.windock.updates.UpdateNavEvent
+import dev.windock.updates.UpdateSettingsRow
+import dev.windock.updates.UpdateStore
+import dev.windock.updates.UpdateUiEvent
 import dev.windock.windows.keepOnTop
 import dev.windock.windows.makeClickThrough
 import kotlinx.coroutines.Dispatchers
@@ -159,6 +165,22 @@ fun main() {
 private fun ApplicationScope.DockApp(initial: DockUiState) {
     val store = remember { DockStore(initial) }
     val state by store.state.collectAsState()
+    val updateScope = rememberCoroutineScope()
+    val updater = remember { UpdateStore(updateScope) }
+    val updateState by updater.state.collectAsState()
+    LaunchedEffect(updater) { updater.poll() }
+    LaunchedEffect(updater) {
+        updater.navigation.collect { event ->
+            if (event == UpdateNavEvent.ExitForInstaller) {
+                withContext(Dispatchers.IO) {
+                    runCatching { DockSettings.save(store.state.value) }
+                        .onFailure { CrashLog.exception("save before update", it) }
+                }
+                // Normal disposal/shutdown releases the app bar and restores the Windows taskbar.
+                exitApplication()
+            }
+        }
+    }
     val apps = remember { TaskbarApps() }
     // Start menu apps for the search; listed once at start-up and refreshed now and then for new installs.
     val appIndex = remember { AppIndex() }
@@ -329,7 +351,8 @@ private fun ApplicationScope.DockApp(initial: DockUiState) {
         withContext(Dispatchers.IO) { runCatching { Autostart.apply(state.startWithWindows && state.theme != DockTheme.SYSTEM) } }
     }
 
-    CompositionLocalProvider(LocalGlassBackdrop provides glass, LocalAppIndex provides appIndex) {
+    CompositionLocalProvider(LocalGlassBackdrop provides glass, LocalAppIndex provides appIndex,
+        LocalUpdateCheck provides { updater.dispatch(UpdateUiEvent.Check) }) {
         if (state.dockActive) {
             DockWindow(state, apps, artwork, hover, menu != null, onGlassVisible = { glassVisible = it }, store::dispatch)
             if (state.settingsOpen) SettingsWindow(state, store::dispatch)
@@ -337,18 +360,31 @@ private fun ApplicationScope.DockApp(initial: DockUiState) {
             PreviewWindow(state, apps, artwork, hover, store::dispatch)
         }
         menu?.let { open -> key(open) { MenuWindow(open, aboveDock = state.dockActive, barHeight = state.barHeight()) { if (menu === open) menu = null } } }
+        UpdateDialog(updateState, updater::dispatch)
     }
 }
 
 @Composable
 private fun ApplicationScope.PreviewWindow(state: DockUiState, apps: TaskbarApps, artwork: ImageBitmap?, hover: DockHover, onEvent: (UiEvent) -> Unit) {
-    val windowState = rememberWindowState(width = 1000.dp, height = 620.dp)
-    Window(onCloseRequest = ::exitApplication, title = "WinDock", icon = AppIcon, state = windowState, resizable = false) {
-        LaunchedEffect(state.settingsOpen) {
-            windowState.size = DpSize(1000.dp, if (state.settingsOpen) 620.dp else 250.dp)
+    val initialSize = remember { comfortableWindowSize(1160, 800) }
+    val windowState = rememberWindowState(size = initialSize, position = WindowPosition(Alignment.Center))
+    Window(onCloseRequest = ::exitApplication, title = "WinDock", icon = AppIcon, state = windowState, resizable = true) {
+        DisposableEffect(window) {
+            window.minimumSize = java.awt.Dimension(minOf(800, initialSize.width.value.toInt()), minOf(520, initialSize.height.value.toInt()))
+            onDispose { }
         }
         MaterialTheme { Surface(color = Color(0xFFF9FAFC)) { DockPreview(state, apps, artwork, hover, onEvent) } }
     }
+}
+
+/** Leave room for window borders and the taskbar, including on smaller or scaled displays. */
+private fun comfortableWindowSize(width: Int, height: Int): DpSize {
+    val screen = GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration
+    val insets = java.awt.Toolkit.getDefaultToolkit().getScreenInsets(screen)
+    val availableWidth = screen.bounds.width - insets.left - insets.right
+    val availableHeight = screen.bounds.height - insets.top - insets.bottom
+    return DpSize(minOf(width.toFloat(), availableWidth * .92f).dp,
+        minOf(height.toFloat(), availableHeight * .92f).dp)
 }
 
 /**
@@ -466,6 +502,8 @@ private fun DockWindow(state: DockUiState, apps: TaskbarApps, artwork: ImageBitm
             val user32 = User32.INSTANCE
             val style = user32.GetWindowLong(hwnd, Win32.GWL_EXSTYLE)
             if (keyboard.granted) {
+                // Enable AWT activation before asking Windows to focus this formerly non-activating bar.
+                window.focusableWindowState = true
                 user32.SetWindowLong(hwnd, Win32.GWL_EXSTYLE, style and Win32.WS_EX_NOACTIVATE.inv())
                 window.toFront()
                 user32.SetForegroundWindow(hwnd)
@@ -763,11 +801,16 @@ private const val VK_ESCAPE = 0x1B
 
 @Composable
 private fun SettingsWindow(state: DockUiState, onEvent: (UiEvent) -> Unit) {
+    val initialSize = remember { comfortableWindowSize(680, 820) }
     Window(
         onCloseRequest = { onEvent(UiEvent.CancelThemeChanges) }, title = "Personalizar WinDock", icon = AppIcon,
-        state = rememberWindowState(size = DpSize(560.dp, 760.dp), position = WindowPosition(Alignment.Center)),
-        resizable = false, alwaysOnTop = true,
+        state = rememberWindowState(size = initialSize, position = WindowPosition(Alignment.Center)),
+        resizable = true, alwaysOnTop = true,
     ) {
+        DisposableEffect(window) {
+            window.minimumSize = java.awt.Dimension(minOf(520, initialSize.width.value.toInt()), minOf(480, initialSize.height.value.toInt()))
+            onDispose { }
+        }
         MaterialTheme { Surface(color = Color(0xFFFFFCF8)) { ThemeSettingsPanel(state, onEvent, Modifier.fillMaxSize()) } }
     }
 }
@@ -775,25 +818,26 @@ private fun SettingsWindow(state: DockUiState, onEvent: (UiEvent) -> Unit) {
 @Composable
 private fun DockPreview(state: DockUiState, apps: TaskbarApps, artwork: ImageBitmap?, hover: DockHover, onEvent: (UiEvent) -> Unit) {
     val previewTheme = state.visibleTheme()
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.Center) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = if (state.settingsOpen) Arrangement.Top else Arrangement.Center) {
         DockStage(state, apps, artwork, hover, onEvent)
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("WINDOWS 11", color = Color(0xFF0066C0), fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(Color(0xFFEAF3FD)).padding(horizontal = 9.dp, vertical = 4.dp))
             Spacer(Modifier.width(10.dp))
-            Text("Prévia — seus apps fixados e abertos já aparecem aqui", color = Color(0xFF59616E), fontSize = 12.sp)
-            Spacer(Modifier.weight(1f))
+            Text("Prévia — seus apps fixados e abertos já aparecem aqui", color = Color(0xFF59616E), fontSize = 12.sp,
+                modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("Tema ${previewTheme.label}", color = Color(0xFF59616E), fontSize = 12.sp,
                 modifier = Modifier.clickable { onEvent(UiEvent.ToggleSettings) }.padding(6.dp))
             Text("◌", color = Color(0xFF59616E), fontSize = 17.sp,
                 modifier = Modifier.clickable { onEvent(UiEvent.ToggleReducedMotion) }.padding(horizontal = 8.dp))
         }
         if (state.settingsOpen) {
-            Dialog(onDismissRequest = { onEvent(UiEvent.CancelThemeChanges) }) {
-                Surface(shape = RoundedCornerShape(22.dp), color = Color(0xFFFFFCF8), shadowElevation = 22.dp) {
-                    ThemeSettingsPanel(state, onEvent, Modifier.width(540.dp).heightIn(max = 640.dp))
-                }
+            Spacer(Modifier.height(16.dp))
+            Surface(modifier = Modifier.weight(1f).align(Alignment.CenterHorizontally).widthIn(max = 920.dp).fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp), color = Color(0xFFFFFCF8), shadowElevation = 4.dp) {
+                ThemeSettingsPanel(state, onEvent, Modifier.fillMaxSize())
             }
         }
     }
@@ -817,6 +861,7 @@ private fun ThemeSettingsPanel(state: DockUiState, onEvent: (UiEvent) -> Unit, m
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 ThemePreview(state.draftTheme, state.randomPaletteIndex)
+                UpdateSettingsRow()
                 SectionTitle("Tema")
                 DockTheme.entries.chunked(2).forEach { pair ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -945,7 +990,7 @@ private fun ThemePreview(theme: DockTheme, randomPaletteIndex: Int) {
             }
             Box(Modifier.width(90.dp).height(30.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF292331)))
         }
-        Text(theme.label.uppercase(), color = if (theme == DockTheme.DARK) Color.White else Color(0xFF34343A),
+        Text(theme.label.uppercase(), color = barInk(theme, themePalette(theme, randomPaletteIndex)).content,
             fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomEnd))
     }
 }

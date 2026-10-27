@@ -38,6 +38,9 @@ Na tela de personalização, escolha um tema e clique em **Aplicar no Windows**.
 
 Instalador (MSI): `./gradlew :composeApp:packageMsi`
 
+Atualizações: esta build inclui um atualizador que verifica novas releases e pede confirmação
+antes de baixar e instalar. Consulte [como preparar e publicar atualizações](docs/auto-update.md).
+
 ---
 
 ## English

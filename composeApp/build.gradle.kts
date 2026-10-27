@@ -4,6 +4,21 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseVersion = providers.gradleProperty("appVersion").get()
+require(Regex("[1-9][0-9]*\\.[0-9]+\\.[0-9]+").matches(releaseVersion)) { "appVersion must be MAJOR.MINOR.PATCH" }
+val versionParts = releaseVersion.split('.').map(String::toInt)
+require(versionParts[0] <= 255 && versionParts[1] <= 255 && versionParts[2] <= 65535) { "appVersion exceeds MSI version limits" }
+val updateMetadata = layout.buildDirectory.dir("generated/updateResources")
+val generateUpdateMetadata = tasks.register("generateUpdateMetadata") {
+    inputs.property("appVersion", releaseVersion)
+    outputs.dir(updateMetadata)
+    doLast {
+        val output = outputs.files.singleFile.resolve("update.properties")
+        output.parentFile.mkdirs()
+        output.writeText("version=${inputs.properties["appVersion"]}\nrepository=arthurriosprogramador/win-dock\n")
+    }
+}
+
 kotlin {
     jvm()
     sourceSets {
@@ -19,6 +34,30 @@ kotlin {
             implementation(compose.desktop.currentOs)
             // Win32 access (taskbar, app bar, window list) for replacing the native taskbar.
             implementation("net.java.dev.jna:jna-platform:5.14.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+        }
+        getByName("jvmMain").resources.srcDir(updateMetadata)
+        jvmTest.dependencies { implementation(kotlin("test")) }
+    }
+}
+
+tasks.named("jvmProcessResources") { dependsOn(generateUpdateMetadata) }
+
+// Compose 1.8 clears jpackage's resource directory internally. Apply the MSI
+// database customization after packaging, before release signing and hashing.
+tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>().configureEach {
+    if (targetFormat == org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi) {
+        val configureMsi = rootProject.file("tools/configure-msi.ps1")
+        val closeDock = rootProject.file("tools/close-dock-for-maintenance.ps1")
+        val msiFile = destinationDir.file("WinDock-$releaseVersion.msi")
+        inputs.files(configureMsi, closeDock)
+        doLast {
+            val installer = msiFile.get().asFile
+            val process = ProcessBuilder(
+                "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                "-File", configureMsi.absolutePath, "-Installer", installer.absolutePath,
+            ).inheritIO().start()
+            check(process.waitFor() == 0) { "Failed to configure MSI maintenance policy" }
         }
     }
 }
@@ -39,7 +78,7 @@ compose.desktop {
         )
         nativeDistributions {
             packageName = "WinDock"
-            packageVersion = "1.0.0"
+            packageVersion = releaseVersion
             vendor = "WinDock"
             description = "A themeable dock that replaces the Windows taskbar"
             // The bundled runtime only has the modules listed here (from `suggestRuntimeModules`): the weather
@@ -57,8 +96,8 @@ compose.desktop {
                 iconFile.set(project.file("icons/windock.ico"))
             }
             macOS {
-                packageVersion = "1.0.0"
-                dmgPackageVersion = "1.0.0"
+                packageVersion = releaseVersion
+                dmgPackageVersion = releaseVersion
             }
             targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg)
         }

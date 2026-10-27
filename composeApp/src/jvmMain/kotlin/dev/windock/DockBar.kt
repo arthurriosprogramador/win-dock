@@ -88,6 +88,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
@@ -172,16 +175,6 @@ private const val GlassVeil = .18f
 /** What the glass theme shows through: a frosted capture of the screen behind the dock (or of the wallpaper). */
 internal val LocalGlassBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
 
-/** Colours for things drawn straight on the bar, picked for contrast with the theme's gradient. */
-private data class BarInk(val content: Color, val muted: Color, val accent: Color, val border: Color)
-
-private fun barInk(palette: List<Color>): BarInk =
-    if (palette.map { it.luminance() }.average() < .45) {
-        BarInk(Color(0xFFF4F5F8), Color(0xFFB9BEC9), Color(0xFF7CC4FF), Color.White.copy(alpha = .28f))
-    } else {
-        BarInk(Ink, Color(0xFF59616E), Blue, Color.White.copy(alpha = .92f))
-    }
-
 /** While the picker is open the draft theme is shown as a live preview; Apply commits it, Cancel restores it. */
 internal fun DockUiState.visibleTheme() = if (settingsOpen) draftTheme else theme
 
@@ -237,7 +230,7 @@ internal fun DockBar(
     val ink = when {
         isGlass && glassLight -> BarInk(Ink, Color(0xFF3F4652), Blue, Color.White.copy(alpha = .7f))
         isGlass -> BarInk(Color(0xFFF7F8FB), Color(0xFFD5D9E2), Color(0xFF8CCBFF), Color.White.copy(alpha = .45f))
-        else -> barInk(palette)
+        else -> barInk(state.visibleTheme(), palette)
     }
     val now = rememberNow()
     fun launch(id: String) = onEvent(UiEvent.LaunchItem(id))
@@ -423,6 +416,7 @@ internal val LocalSearchSession = staticCompositionLocalOf<SearchSession?> { nul
  * matching apps and Settings pages plus file and web searches; ↑/↓ pick, Enter opens, Esc or clicking away closes.
  */
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 private fun SearchTile(keyboard: KeyboardGrant, onEvent: (UiEvent) -> Unit) {
     val session = LocalSearchSession.current ?: remember { SearchSession() }
     val index = LocalAppIndex.current
@@ -431,7 +425,8 @@ private fun SearchTile(keyboard: KeyboardGrant, onEvent: (UiEvent) -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
-    val expanded = hovered || focused || session.query.isNotEmpty()
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    val expanded = hovered || focused || keyboard.granted || session.query.isNotEmpty()
     val width by animateDpAsState(if (expanded) 220.dp else TileSize, spring(dampingRatio = .72f, stiffness = 380f), label = "search-width")
     val reveal by animateFloatAsState(if (expanded) 1f else 0f, spring(dampingRatio = .8f, stiffness = 300f), label = "search-reveal")
 
@@ -452,12 +447,13 @@ private fun SearchTile(keyboard: KeyboardGrant, onEvent: (UiEvent) -> Unit) {
             session.selected = 0
         }
     }
-    // Clicking the field asks the window for the keyboard first; focus can only land once the window accepts it.
-    LaunchedEffect(keyboard.granted) {
-        if (keyboard.granted) {
-            delay(60)
-            runCatching { focusRequester.requestFocus() }
-        } else if (focused || session.query.isNotEmpty()) {
+    val fieldVisible = reveal > .02f
+    // Native activation and field composition are asynchronous. Wait for both, not a fixed timeout.
+    LaunchedEffect(keyboard.granted, windowFocused, fieldVisible) {
+        if (keyboard.granted && windowFocused && fieldVisible) {
+            androidx.compose.runtime.withFrameNanos { }
+            focusRequester.requestFocus()
+        } else if (!keyboard.granted && (focused || session.query.isNotEmpty())) {
             session.query = ""
             focusManager.clearFocus()
         }
@@ -471,7 +467,14 @@ private fun SearchTile(keyboard: KeyboardGrant, onEvent: (UiEvent) -> Unit) {
                 .background(Brush.verticalGradient(listOf(Color.White, Color(0xFFF0F2F5))))
                 .border(1.dp, if (focused) Blue.copy(alpha = .7f) else Color.White.copy(alpha = .7f), TileShape)
                 .hoverable(interaction)
-                .clickable(interaction, indication = null) { keyboard.granted = true }
+                // Observe the press before BasicTextField consumes it; leave caret placement to the field.
+                .onPointerEvent(PointerEventType.Press, PointerEventPass.Initial) { event ->
+                    if (event.buttons.isPrimaryPressed) keyboard.granted = true
+                }
+                .clickable(interaction, indication = null) {
+                    keyboard.granted = true
+                    if (windowFocused && fieldVisible) focusRequester.requestFocus()
+                }
                 .padding(horizontal = 15.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -488,7 +491,7 @@ private fun SearchTile(keyboard: KeyboardGrant, onEvent: (UiEvent) -> Unit) {
                 drawCircle(Blue.copy(alpha = .18f * reveal), size.width * .24f, lens)
                 drawLine(Ink, lens + Offset(size.width * .22f, size.height * .22f), Offset(size.width * .92f, size.height * .92f), 2.6f * u, StrokeCap.Round)
             }
-            if (reveal > .02f) {
+            if (fieldVisible) {
                 Box(Modifier.weight(1f).padding(start = 10.dp).graphicsLayer {
                     alpha = reveal
                     translationX = (1f - reveal) * -10.dp.toPx()
@@ -572,6 +575,8 @@ private fun DockTile(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val highlight by animateFloatAsState(if (hovered) 1f else 0f, tween(150), label = "tile-highlight-$id")
     val lift = LocalTileLift.current
     val grow by animateFloatAsState(magnify * lift, spring(dampingRatio = .62f, stiffness = 420f), label = "tile-grow-$id")
     val press by animateFloatAsState(if (pressed) .9f else 1f, spring(dampingRatio = .5f, stiffness = 900f), label = "tile-press-$id")
@@ -600,14 +605,15 @@ private fun DockTile(
                     clip = true
                 }
                 .background(background)
-                .border(1.dp, Color.White.copy(alpha = .7f), TileShape),
+                .background(ink.hover.copy(alpha = .12f * highlight))
+                .border(1.dp, androidx.compose.ui.graphics.lerp(Color.White.copy(alpha = .7f), ink.hover, highlight), TileShape),
             contentAlignment = Alignment.Center,
             content = content,
         )
         Spacer(Modifier.height(5.dp))
         Box(
             Modifier.width(indicatorWidth).height(5.dp).clip(CircleShape)
-                .background(if (indicator == Indicator.ACTIVE) ink.accent else ink.accent.copy(alpha = .85f)),
+                .background(ink.accent),
         )
     }
 }
@@ -711,7 +717,8 @@ private fun CalendarTile(now: LocalDateTime, hover: DockHover, magnify: Float, o
 @Composable
 private fun Tray(status: SystemStatus, now: LocalDateTime, ink: BarInk, hover: DockHover, onEvent: (UiEvent) -> Unit) {
     val quickSettings = { onEvent(UiEvent.LaunchItem(ShellAction.QUICK_SETTINGS)) }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    Row(Modifier.background(ink.traySurface, RoundedCornerShape(10.dp)),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         Column(horizontalAlignment = Alignment.Start) {
             status.battery?.let { battery ->
                 TrayButton("tray:battery", batteryLabel(battery), hover, ink, quickSettings) {
@@ -762,7 +769,7 @@ private fun ShowDesktopSliver(
             .clickable(interaction, indication = null, onClick = onClick)
             .width(width).fillMaxHeight()
             .clip(shape)
-            .background(ink.content.copy(alpha = .1f * highlight)),
+            .background(ink.hover.copy(alpha = .16f * highlight)),
         contentAlignment = Alignment.CenterStart,
     ) {
         Box(Modifier.width(1.dp).fillMaxHeight(.5f).background(ink.muted.copy(alpha = .55f + .35f * highlight)))
@@ -786,7 +793,7 @@ private fun TrayButton(
         hoverReporting(id, label, hover, interaction)
             .then(modifier)
             .clip(RoundedCornerShape(7.dp))
-            .background(ink.content.copy(alpha = .12f * highlight))
+            .background(ink.hover.copy(alpha = .14f * highlight))
             .clickable(interaction, indication = null, onClick = onClick)
             .padding(horizontal = 5.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center,
