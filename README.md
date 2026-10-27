@@ -18,7 +18,11 @@ WinDock é uma barra de tarefas personalizada para Windows 10/11, feita com Kotl
 - Pesquisa de apps e configurações, fixar e desafixar apps, mostrar a área de trabalho
 - Tema **Sistema**: devolve a barra de tarefas padrão do Windows com um clique
 
-### Como rodar
+### Download
+
+Baixe o instalador **WinDock-1.0.0.msi** em [Releases](https://github.com/arthurriosprogramador/win-dock/releases/latest). A instalação é por usuário, sem pedir administrador. O instalador não é assinado, então o Windows pode mostrar o aviso do SmartScreen: clique em **Mais informações → Executar assim mesmo**.
+
+### Como rodar o código
 
 Requisitos: Windows 10 (2004+) ou 11 e JDK 17 ou mais novo.
 
@@ -44,7 +48,11 @@ WinDock is a custom taskbar for Windows 10/11, built with Kotlin and Compose Mul
 - App and settings search, pin and unpin apps, show desktop
 - **System** theme: gives the standard Windows taskbar back in one click
 
-### Running
+### Download
+
+Get the **WinDock-1.0.0.msi** installer from [Releases](https://github.com/arthurriosprogramador/win-dock/releases/latest). It installs per user, with no administrator prompt. The installer isn't code-signed, so Windows may show a SmartScreen warning: click **More info → Run anyway**.
+
+### Running from source
 
 Requirements: Windows 10 (2004+) or 11 and JDK 17 or newer.
 
