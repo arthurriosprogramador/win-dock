@@ -39,12 +39,13 @@ compose.desktop {
         )
         nativeDistributions {
             packageName = "WinDock"
-            packageVersion = "0.1.0"
+            packageVersion = "1.0.0"
             vendor = "WinDock"
             description = "A themeable dock that replaces the Windows taskbar"
             // The bundled runtime only has the modules listed here (from `suggestRuntimeModules`): the weather
             // client needs java.net.http, autostart needs java.management, and Compose/JNA need jdk.unsupported.
-            modules("java.instrument", "java.management", "java.net.http", "jdk.unsupported")
+            // jdk.localedata isn't detected but is needed: without it dates fall back to English ("TUE", not "TER").
+            modules("java.instrument", "java.management", "java.net.http", "jdk.unsupported", "jdk.localedata")
             windows {
                 // Per-user install: no administrator prompt, matching the per-user autostart task.
                 perUserInstall = true

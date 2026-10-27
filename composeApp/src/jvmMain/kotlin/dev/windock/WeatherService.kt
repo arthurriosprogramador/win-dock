@@ -74,7 +74,7 @@ internal class WeatherService {
 
     private fun get(url: String): String? = runCatching {
         val request = HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(15))
-            .header("User-Agent", "WinDock/0.1 (desktop dock; weather tile)").build()
+            .header("User-Agent", "WinDock/1.0 (desktop dock; weather tile)").build()
         http.send(request, HttpResponse.BodyHandlers.ofString()).takeIf { it.statusCode() == 200 }?.body()
     }.getOrNull()
 
