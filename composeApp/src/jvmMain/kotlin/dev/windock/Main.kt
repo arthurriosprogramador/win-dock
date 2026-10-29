@@ -181,9 +181,9 @@ private fun ApplicationScope.DockApp(initial: DockUiState) {
             }
         }
     }
-    val apps = remember { TaskbarApps() }
     // Start menu apps for the search; listed once at start-up and refreshed now and then for new installs.
     val appIndex = remember { AppIndex() }
+    val apps = remember(appIndex) { TaskbarApps(appIndex) }
     LaunchedEffect(appIndex) {
         withContext(Dispatchers.IO) {
             while (isActive) {

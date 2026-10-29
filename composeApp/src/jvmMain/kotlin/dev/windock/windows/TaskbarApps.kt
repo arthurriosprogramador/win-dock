@@ -29,7 +29,7 @@ internal data class PinnedShortcut(val file: File, val name: String, val target:
  * Mirrors what the native taskbar shows: shortcuts pinned to it plus every app with an open window,
  * merged by executable so a pinned Chrome and its open windows are one icon.
  */
-internal class TaskbarApps {
+internal class TaskbarApps(private val appIndex: AppIndex? = null) {
     private val user32 = User32.INSTANCE
     private val pinnedFolder = File(System.getenv("APPDATA") ?: "", "Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar")
     private var pinnedStamp = -1L
@@ -37,6 +37,7 @@ internal class TaskbarApps {
     private val exeByPid = HashMap<Int, String>()
     private val icons = ConcurrentHashMap<String, ImageBitmap>()
     private val missingIcons = ConcurrentHashMap.newKeySet<String>()
+    @Volatile private var appUserModelIds: Map<String, String> = emptyMap()
 
     @Volatile private var windowsByApp: Map<String, List<AppWindow>> = emptyMap()
     @Volatile private var launchTargets: Map<String, String> = emptyMap()
@@ -46,7 +47,11 @@ internal class TaskbarApps {
     @Volatile var dockPins: List<PinnedApp> = emptyList()
     @Volatile var hiddenPins: Set<String> = emptySet()
 
-    fun icon(id: String): ImageBitmap? = icons[id]
+    fun icon(id: String): ImageBitmap? {
+        // Packaged Windows apps use an AppsFolder identity; their host .exe often has only a blank document icon.
+        appUserModelIds[id]?.let { appIndex?.icon(it) }?.let { return it }
+        return icons[id]
+    }
 
     /** Rescans pinned shortcuts (only when the folder changed) and open windows. Call off the UI thread. */
     fun refresh(): List<DockItem> {
@@ -63,6 +68,7 @@ internal class TaskbarApps {
         enumerateAppWindows().forEach { groups.getOrPut(appId(it)) { mutableListOf() } += it }
         val foreground = user32.GetForegroundWindow()
         val launch = HashMap<String, String>()
+        val appIds = HashMap<String, String>()
         val items = mutableListOf<DockItem>()
         fun item(id: String, label: String, pinned: Boolean): DockItem {
             val windows = groups[id].orEmpty()
@@ -76,6 +82,7 @@ internal class TaskbarApps {
             val id = shortcut.target?.lowercase() ?: shortcut.file.path.lowercase()
             if (id in hiddenPins) return@forEach
             launch[id] = shortcut.file.path
+            JumpLists.appUserModelIdOf(shortcut.file)?.let { appIds[id] = it }
             // The shortcut carries the icon the taskbar shows (PWAs and Store apps have no useful exe icon).
             loadIcon(id, shortcut.file)
             items += item(id, shortcut.name, pinned = true)
@@ -83,8 +90,12 @@ internal class TaskbarApps {
         dockPins.forEach { pin ->
             if (items.any { it.id == pin.id }) return@forEach
             launch[pin.id] = pin.target
+            if (pin.target.endsWith(".lnk", true)) JumpLists.appUserModelIdOf(File(pin.target))?.let { appIds[pin.id] = it }
             loadIcon(pin.id, File(pin.target))
             items += item(pin.id, pin.label, pinned = true)
+        }
+        groups.forEach { (id, windows) ->
+            if (id !in appIds) windows.firstNotNullOfOrNull { JumpLists.appUserModelIdOf(it.hwnd) }?.let { appIds[id] = it }
         }
         val pinnedIds = items.mapTo(HashSet()) { it.id }
         groups.filterKeys { it !in pinnedIds }.forEach { (id, windows) ->
@@ -94,6 +105,7 @@ internal class TaskbarApps {
             items += item(id, if (id.startsWith("hwnd:")) windows.first().title else friendlyName(exe), pinned = false)
         }
         windowsByApp = groups
+        appUserModelIds = appIds
         launchTargets = launch
         labels = items.associate { it.id to it.label }
         return items
